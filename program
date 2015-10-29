@@ -1,0 +1,122 @@
+#Arguments for all functions:
+# n: total number of objects included in survey 1 without subdivision of factors
+# x: total number of objects who are counted towards a factor
+# m1:total number of objects included in survey2 level 1 of the factor
+# x1: total number of objects who are counted towards a factor level1
+# m2:total number of objects included in survey3 level 1 of the factor
+# x2: total number of objects who are counted towards a factor level2
+# initial: starting guess for the maximum loglikelihood estimator
+# iterations: number of times the function is going to execute a particular algorithm
+# to reach loglikehood maximum estimator
+
+# Returns: The functions return the estimate after each iteration as well as the last
+# estimate the algorithm stops at which is the maximum log likelihood estimators for both
+# parameter p1 and p2
+
+# For the following functions the parameter p is a vector where the 
+# first entry is p1 and the second entry is p2
+# Compute the log likelihood for parameter p which is a vector of p1 and p2
+log_likelihood = function (p,n,m1,m2,x,x1,x2){
+  matrix(c(log(choose(n,x))+ x*log((p[1]+p[2])/2)+ (n-x)*log(1-((p[1]+p[2])/2))+log(choose(m1,x1))+
+             x1*log(p[1])+ (m1-x1)*log(1-p[1]) + log(choose(m2,x2))+ x2*log(p[2])+ (m2-x2)*log(1-p[2])))
+}
+# Compute the gradient vector for the log likelihood
+log_likelihood_gradient = function (p,n,m1,m2,x,x1,x2){
+  first = ((x/(p[1]+p[2]))-((n-x)/(2-(p[1]+p[2])))+(x1/p[1])-((m1-x1)/(1-p[1])))
+  second = ((x/(p[1]+p[2]))-((n-x)/(2-(p[1]+p[2])))+(x2/p[2])-((m2-x2)/(1-p[2])))
+  matrix(c(first,second))
+}
+# Compute the Hessian matrix for the log likelihood
+log_likelihood_hessian = function (p,n,m1,m2,x,x1,x2){
+  wrt1p1 = (-x/(p[1]+p[2])^2) - ((n-x)/(2-(p[1]+p[2]))^2) - (x1/(p[1])^2) - ((m1-x1)/(1-p[1])^2)
+  wrt1p2 = (-x/(p[1]+p[2])^2) - ((n-x)/(2-(p[1]+p[2]))^2)
+  wrt2p1 = (-x/(p[1]+p[2])^2) - ((n-x)/(2-(p[1]+p[2]))^2)
+  wrt2p2 = (-x/(p[1]+p[2])^2) - ((n-x)/(2-(p[1]+p[2]))^2) - (x2/(p[2]^2)) - ((m2-x2)/(1-p[2])^2)
+  matrix(c(wrt1p1,wrt2p1,wrt2p1,wrt2p2),2,2)  
+}
+
+# Compute the Fisher information matrix
+fisher_information = function (p,n,m1,m2){
+  expected1 = (((-n/2)/(p[1]+p[2])) - (n/(2*(2-(p[1]+p[2])))) - (m1/p[1]) - (m1/(1-p[1])))
+  expected2 = (((-n/2)/(p[1]+p[2])) - (n/(2*(2-(p[1]+p[2])))))
+  expected3 = (((-n/2)/(p[1]+p[2])) - (n/(2*(2-(p[1]+p[2])))))
+  expected4 = (((-n/2)/(p[1]+p[2])) - (n/(2*(2-(p[1]+p[2])))) - (m2/p[2]) - (m2/(1-p[2])))
+  matrix(c(expected1,expected2,expected3,expected4),2,2)
+}
+source("~/Desktop/graduate first semester/Computational stats/bisect.r")
+source("~/Desktop/graduate first semester/Computational stats/mvnewton.r")
+
+
+# Finding the MLE for p1 and p2 using Alternating maximization 
+#(non-linear Gauss-Siedel iteration), using bisection
+
+options(digits=17)
+mle_alt <- function (n,m1,m2,x,x1,x2,initial)
+{ estimates1=vector(); estimates2=vector()
+  p1<- bisect2(function(p1) log_likelihood_gradient(c(p1,initial[2]),n,m1,m2,x,x1,x2)[1], 0.0000001, 0.9999999)
+  p2<- bisect2(function(p2) log_likelihood_gradient(c(p1,p2),n,m1,m2,x,x1,x2)[2], 0.0000001, 0.999999)
+  
+  converged <- F
+  no <- 0
+  
+  while (!converged)
+  { 
+    old<- c(p1,p2)
+    p1<- bisect2(function(p1) log_likelihood_gradient(c(p1,old[2]),n,m1,m2,x,x1,x2)[1], 0.0000001, 0.999999)
+    p2<- bisect2(function(p2) log_likelihood_gradient(c(p1,p2),n,m1,m2,x,x1,x2)[2], 0.0000001, 0.999999)
+    
+    new <- c(p1,p2)
+    cat("\nAt iteration",no,":\n\n")
+    cat("p=",new,"\n")
+    estimates1=append(estimates1,new[1])
+    estimates2=append(estimates2,new[2])
+    
+    no <- no + 1
+    converged <- all (abs(old-new) < 0.00000000001)
+  }
+  
+  list (p1=p1, p2=p2, no.iterations=no)
+  par(mfrow=c(2,2))
+  plot(estimates1,xlab="iteration",ylab="estimate")
+  plot(estimates2,xlab="iteration",ylab="estimate")
+}
+
+#Finding the MLE for p1 and p2 using multivariate Newton iteration
+mle_mvn = function (n,m1,m2,x,x1,x2,initial,iters){
+  f=function(p) log_likelihood_gradient(p,n,m1,m2,x,x1,x2)
+  g=function(p) log_likelihood_hessian(p,n,m1,m2,x,x1,x2)
+  if (iters<1)
+    stop("invalid number of iterations")
+    
+    grid <- seq(-2,2,by=0.02)
+    fx1 <- matrix(nrow=length(grid),ncol=length(grid))
+    fx2 <- matrix(nrow=length(grid),ncol=length(grid))
+    for (i in 1:length(grid)) {
+      for (j in 1:length(grid)) {
+        fx <- f(c(grid[i],grid[j]))
+        fx1[i,j] <- fx[1]
+        fx2[i,j] <- fx[2]
+      }
+    }
+    contour(grid,grid,fx1,col="red")
+    contour(grid,grid,fx2,add=TRUE,col="blue")
+    points(initial[1],initial[2],pch="+")
+    p=  mvnewton(f,g,initial,iters)
+    points(p[1],p[2])
+    }
+
+#Finding the MLE for p1 and p2 using multivariate method of scoring
+mle_mos = function (n,m1,m2,x,x1,x2,initial,iters){
+  if (iters<1)
+    stop("invalid number of iterations")
+  f=function(p) log_likelihood_gradient(p,n,m1,m2,x,x1,x2)
+  g=function(p) fisher_information(p,n,m1,m2)
+    p= mvnewton(f,g,initial,iters)
+    }
+
+# Finding the MLE for p1 and p2 using nlm method, giving it a function
+# that computes the log likelihood and its gradient and Hessian
+options(digits=17)
+mle_nlm = function (n,m1,m2,x,x1,x2,initial){
+  nlm(function (p) - log_likelihood(p,n,m1,m2,x,x1,x2),initial,hessian=TRUE)
+}
